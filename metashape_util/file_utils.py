@@ -3,6 +3,8 @@ import csv
 from collections import defaultdict
 import warnings
 
+import numpy as np
+
 class FileUtils:
 	def parsePath(path):
 		path_head, path_tail = os.path.split(path)

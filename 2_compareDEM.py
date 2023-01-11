@@ -1,20 +1,29 @@
+import configparser
+import csv
+import os
 import Metashape
 import numpy as np
 import pandas as pd
 import rasterio as rio
 import rioxarray
 import matplotlib.pyplot as plt
+from metashape_util.dialog import Dialog
 from metashape_util.file_utils import FileUtils
 from metashape_util.geo_utils import GeoUtils
 from metashape_util.chunk import ChunkUtils
 
 app = Metashape.Application()
 doc = app.document
+dialog = Dialog(app)
+
+#config parser
+config = configparser.ConfigParser()
+config.read(sys.path[0] + "\config.ini")
 
 documentFile = FileUtils.parsePath(doc.path)
 
 # CONFIG
-DEM_EXPORT_FOLDER = "C:\\Users\\Hiwi-440a\\Desktop\\"
+DEM_EXPORT_FOLDER = os.path.expanduser(config["Defaults"].get("DEM_EXPORT_FOLDER", "~\\Desktop\\autoDEM\\"))
 DEM_EXPORT_FOLDER += documentFile['name'] + "\\"
 
 
@@ -23,22 +32,67 @@ DEM_EXPORT_FOLDER += documentFile['name'] + "\\"
 # Betrieb;       Versuchsfläche;     Bezeichnung Messpunkt/Dateiname;    Type;   Longitude;  Latitude;       Altitude
 # Meiereihof;    R3/1;               R3/1 - GCP Nordost;                 GCP;    9,21929980; 48,71619670;    364,70
 geocoord_csv_files = {
-    "aufwuchs1": "J:\\440a\\HiWi\\Allgemein\\Bosch\\Python\\2022_Messprotokoll_Geodaten_Hohenheim_1.Aufwuchs.csv",
+    "aufwuchs1": "J:\\440a\\HiWi\\Allgemein\\Bosch\\Python\\2021_Messprotokoll_Geodaten_Hohenheim_1.Aufwuchs.csv",
     "aufwuchs2": "J:\\440a\\HiWi\\Allgemein\\Bosch\\Python\\2022_Messprotokoll_Geodaten_Hohenheim_2.Aufwuchs.csv",
 }
 
+# Constant var containing all parcel positions
+FIELD_PARCELS = FileUtils.read_geocoord_files(geocoord_csv_files)
+
+# Check for exported tif files (the DEM files)
+dem_files = []
+for entry in os.scandir(DEM_EXPORT_FOLDER):
+    file = FileUtils.parsePath(entry.path)
+    if(file["extension"].upper() in [".TIF"]): # only scan for .tif files
+        dem_files.append(file["name"])
+
 # this file contains any task data, which parcels shold be read
-task_csv_file = DEM_EXPORT_FOLDER + "compare_dem.CSV"
+task_csv_file = DEM_EXPORT_FOLDER + "compare_dem_task.CSV"
 # Bezeichnung;  Basismodell;    Aufzeichnung;   Parzelle;   Index N;    Index O;    Geo Koordinaten
 # BM1PA;        2022-03-23_R1;  2022-03-29_R1;  A;          0;          0;          aufwuchs1
 
 # the calculations results will be stored in this file. Format is the same as the tasks csv file
 task_csv_file_out = DEM_EXPORT_FOLDER + "compare_dem_result.CSV"
 
+if not os.path.exists(task_csv_file):
+    createTaskFile = app.getBool("Es existiert noch keine Auftrags Datei. Die Auftragsdatei enhält Informationen welche Parzellen verglichen werden sollen. Mit Bestätigen wir eine neue Auftragsvorlage aus dem Projekt generiert.")
+    
+    if(createTaskFile):
+        print("Creating Task file: " + task_csv_file)
+
+        baseModel = dialog.getListCoice(dem_files, "Wähle das Basis-Modell (die Null-Referenz). Damit werden alle anderen Messungen verglichen")
+        print("Setting {} as Base Model".format(baseModel))
+        with open(task_csv_file, "w", newline='') as csv_file:
+            writer = csv.writer(csv_file, delimiter=";")
+            writer.writerow(["Bezeichnung", "Basismodell", "Aufzeichnung", "Parzelle", "Index N", "Index O", "Geo Koordinaten"])
+
+            rec = 0 # record number
+            parcelNo = 0
+            for dem_file in dem_files:
+                if dem_file == baseModel: 
+                    parcelNo = 0 # reset parcel number - after base model we restart at parcel 0
+                    continue
+                
+                rec += 1 
+
+                field_date, field_name = ChunkUtils.parseChunkName(dem_file)
+
+                for parcel in FIELD_PARCELS["aufwuchs1"][field_name]:
+                    if(parcel in ["GCP", "BS"]): continue
+
+                    bez = "BM{}P{}{}".format(rec, parcel, parcelNo+1)
+
+                    writer.writerow([bez, baseModel, dem_file, parcel, parcelNo, 0, "aufwuchs1"])
+
+                parcelNo += 1
+
+        raise Exception("Bitte fülle die Auftragsdatei mit den gewünschten Werten und starte dieses Skript neu.")
 
 
-# Constant var containing all parcel positions
-FIELD_PARCELS = FileUtils.read_geocoord_files(geocoord_csv_files)
+# First create the export folders if they are not already there
+FileUtils.createDirsIfNotExists(DEM_EXPORT_FOLDER + "parcels\\input\\")
+FileUtils.createDirsIfNotExists(DEM_EXPORT_FOLDER + "parcels\\difference\\")
+
 
 # Read tasks file
 tasks_df = pd.read_csv(task_csv_file, index_col='Bezeichnung', delimiter=";", decimal=",")

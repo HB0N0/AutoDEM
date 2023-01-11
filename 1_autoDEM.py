@@ -3,12 +3,14 @@ import argparse
 from pprint import pprint
 from collections import defaultdict
 import os, sys, time, re
+import configparser
 from datetime import datetime
 
 from metashape_util.chunk import ChunkUtils
 from metashape_util.dialog import Dialog 
 from metashape_util.file_utils import  FileUtils
 from metashape_util.stats import  Stats
+from metashape_util.email_notify import EmailNotify
 
 from gcp_detector.gcpToMarker import GcpToMarker
 
@@ -20,7 +22,16 @@ doc = app.document
 dialog = Dialog(app)
 gcpToMarker = GcpToMarker()
 
+#config parser
+config = configparser.ConfigParser()
+config.read(sys.path[0] + "\config.ini")
+
+#setup email configuration
+notify = EmailNotify(config["EmailNotify"])
+
 start_time = datetime.now()
+
+
 
 try:
 	doc.save()
@@ -30,8 +41,9 @@ except OSError:
 documentFile = FileUtils.parsePath(doc.path)
 
 # CONFIG
-MARKER_MAX_ERROR_METERS = 0.1
-DEM_EXPORT_FOLDER = "C:\\Users\\Hiwi-440a\\Desktop\\"
+MARKER_MAX_ERROR_METERS = config["Defaults"].getfloat("MARKER_MAX_ERROR_METERS", 0.1)
+
+DEM_EXPORT_FOLDER = os.path.expanduser(config["Defaults"].get("DEM_EXPORT_FOLDER", "~\\Desktop\\autoDEM\\"))
 DEM_EXPORT_FOLDER += documentFile['name'] + "\\"
 
 FileUtils.createDirsIfNotExists(DEM_EXPORT_FOLDER)
@@ -174,7 +186,7 @@ for chunk in doc.chunks:
 
 stats.saveFile()
 
-#doc.save()
+doc.save()
 gcp_failed_chunks = []
 # build surface model
 for chunk in doc.chunks:
@@ -195,6 +207,12 @@ for chunk in doc.chunks:
 		gcp_failed_chunks.append((chunk, chunk_marker_error))
 		print("Skipping chunk " + chunk.label + " due inaccurate marker positions")
 		continue
+
+	# Ensure that the model is optimized from GCPs
+	# Update Model
+	chunk.updateTransform()
+	# Optimize Cameras
+	chunk.optimizeCameras()
 
 	if(len(chunk.dense_clouds) <= 0):
 		# Downscale is what is named "quality" in GUI. Where 0 - is Ultra, 1 - High, 2 - Medium, 4 - Low.
@@ -242,22 +260,33 @@ for chunk in doc.chunks:
 	stats.setValue(chunk, "dem_export_path", dem_export_path)
 	stats.saveFile()
 
+doc.save()
 end_time = datetime.now()			
 
-print("######################################")
-print("Finished Job: processing aerial photos")
-print('The Job took: {}'.format(end_time - start_time))
+
+gcp_failed_text = ""
 if(len(gcp_failed_chunks) > 0 ):
-	print("WARNING -----------------------------------------------------")
-	print("Auto GCP detection was to unaccurate in following chunks:")
+	gcp_failed_text +=  "WARNING -----------------------------------------------------\n"
+	gcp_failed_text += "Auto GCP detection was to unaccurate in following chunks: \n"
 	for failed in gcp_failed_chunks:
-		print("\t" + failed[0].label + " Error:" + str(failed[1]))
-	print("Try to correct marker locations by hand and run this script again")
-	print("All successful Tasks will not run again")
-	print("-------------------------------------------------------------")
+		gcp_failed_text += "\t" + failed[0].label + " Error:" + str(failed[1]) + "\n"
+	gcp_failed_text += "Try to correct marker locations by hand and run this script again\n"
+	gcp_failed_text += "Successful chunks will be ignored and not proccessed again\n"
+	gcp_failed_text += "-------------------------------------------------------------\n"
 
-print("The exported elevation models (if any) are located in: ")
-print(DEM_EXPORT_FOLDER)
-print("######################################")
 
+result = """
+######################################
+Finished job: processing aerial photos
+The job took: {duration}
+{gcp_failed_text}
+The exported elevation models (if any) are located in: 
+{export_dir}
+######################################
+""".format(duration=(end_time - start_time), gcp_failed_text = gcp_failed_text, export_dir=DEM_EXPORT_FOLDER)
+
+print(result)
+
+#send email notification
+notify.notify("Job finished! {}".format(documentFile['name']), result)
 
