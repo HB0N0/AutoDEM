@@ -1,5 +1,6 @@
 import configparser
 import csv
+import json
 import os
 import sys
 import Metashape
@@ -105,6 +106,11 @@ FileUtils.createDirsIfNotExists(DEM_EXPORT_FOLDER + "parcels\\difference\\")
 # Read tasks file
 tasks_df = pd.read_csv(task_csv_file, index_col='Bezeichnung', delimiter=";", decimal=",")
 
+# Create a basic object containing all parcel tile coordinates
+parcel_geojson = {"type": "FeatureCollection", "features": []}
+parcel_geojson_path = DEM_EXPORT_FOLDER + "parcels\\parcel_tiles.geojson"
+
+
 # Loop through tasks and calculate result
 for index, task in tasks_df.iterrows():
     print("Calculating Tile {}...".format(index))
@@ -174,11 +180,30 @@ for index, task in tasks_df.iterrows():
 
     saveVal("Mean", dem_diff.mean().item())
     saveVal("Std", dem_diff.std().item())
-    saveVal("Median", dem_diff.median().item())
     saveVal("Min", dem_diff.min().item())
     saveVal("Max", dem_diff.max().item())
-    saveVal("25", dem_diff.quantile(0.25).item())
-    saveVal("75", dem_diff.quantile(0.75).item())
+    saveVal("Q25", dem_diff.quantile(0.25).item())
+    saveVal("Q50", dem_diff.median().item())
+    saveVal("Q75", dem_diff.quantile(0.75).item())
+
+    # add the mask area (the parcel tile) to geojson feature collection
+    parcel_geojson["features"].append({
+        "type": "Feature",
+        "geometry": mask_parcel,
+        "properties": {
+          "name": index,
+          "field": field_name,
+          "index-n": task["Index N"],
+          "index-o": task["Index O"],
+          "mean": dem_diff.mean().item(),
+          "std": dem_diff.std().item(),
+          "min": dem_diff.min().item(),
+          "max": dem_diff.max().item(),
+          "Q25": dem_diff.quantile(0.25).item(),
+          "Q50": dem_diff.median().item(),
+          "Q75": dem_diff.quantile(0.75).item()
+        }
+      })
 
     app.update()
     continue
@@ -201,6 +226,11 @@ for index, task in tasks_df.iterrows():
     plt.show()
 
     break
+
+# export geojson file
+with open(parcel_geojson_path, 'w', encoding='utf8') as pf:
+    json.dump(parcel_geojson, pf, indent=4)
+    print("The probed area dimensions where exported to {}".format(parcel_geojson_path))
 
 print("================================")
 print("Finished task. Check {} for results.".format(task_csv_file_out))
