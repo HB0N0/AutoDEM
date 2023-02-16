@@ -1,6 +1,7 @@
 import configparser
 import csv
 import os
+import sys
 import Metashape
 import numpy as np
 import pandas as pd
@@ -31,15 +32,15 @@ DEM_EXPORT_FOLDER += documentFile['name'] + "\\"
 # Format: !!! First line is ignored (header line)
 # Betrieb;       Versuchsfläche;     Bezeichnung Messpunkt/Dateiname;    Type;   Longitude;  Latitude;       Altitude
 # Meiereihof;    R3/1;               R3/1 - GCP Nordost;                 GCP;    9,21929980; 48,71619670;    364,70
-geocoord_csv_files = {
-    "aufwuchs1": "J:\\440a\\HiWi\\Allgemein\\Bosch\\Python\\2021_Messprotokoll_Geodaten_Hohenheim_1.Aufwuchs.csv",
-    "aufwuchs2": "J:\\440a\\HiWi\\Allgemein\\Bosch\\Python\\2022_Messprotokoll_Geodaten_Hohenheim_2.Aufwuchs.csv",
-}
+geocoord_csv_files = dict(config["GEOCOORD_FILES"].items())
 
 # Constant var containing all parcel positions
 FIELD_PARCELS = FileUtils.read_geocoord_files(geocoord_csv_files)
 
-# Check for exported tif files (the DEM files)
+if not FIELD_PARCELS: # if dictionary is empty raise exception and terminate
+    raise Exception("Error: No Geocoord files found. Check config.ini: Section [GEOCOORD_FILES] should have at least one key with working file path")
+
+# Check for avaliable exported tif files (the DEM files)
 dem_files = []
 for entry in os.scandir(DEM_EXPORT_FOLDER):
     file = FileUtils.parsePath(entry.path)
@@ -55,7 +56,7 @@ task_csv_file = DEM_EXPORT_FOLDER + "compare_dem_task.CSV"
 task_csv_file_out = DEM_EXPORT_FOLDER + "compare_dem_result.CSV"
 
 if not os.path.exists(task_csv_file):
-    createTaskFile = app.getBool("Es existiert noch keine Auftrags Datei. Die Auftragsdatei enhält Informationen welche Parzellen verglichen werden sollen. Mit Bestätigen wir eine neue Auftragsvorlage aus dem Projekt generiert.")
+    createTaskFile = app.getBool("Es existiert noch keine Auftrags Datei. Die Auftragsdatei enhält Informationen welche Parzellen verglichen werden sollen. Soll eine neue Auftragsvorlage aus dem Projekt generiert werden?")
     
     if(createTaskFile):
         print("Creating Task file: " + task_csv_file)
@@ -68,25 +69,32 @@ if not os.path.exists(task_csv_file):
 
             rec = 0 # record number
             parcelNo = 0
+            geocoord_file_index = 0
             for dem_file in dem_files:
-                if dem_file == baseModel: 
+                # Loop through all exported tif files
+                # if current file is the base model
+                if dem_file == baseModel:
+                    if rec != 0: # if first record is the base model dont increment the geocoord file
+                        geocoord_file_index += 1
+                        geocoord_file_index = min(geocoord_file_index, len(FIELD_PARCELS.keys()) - 1) # ensure there is a geocoord file with this key
+
                     parcelNo = 0 # reset parcel number - after base model we restart at parcel 0
                     continue
                 
                 rec += 1 
-
+                geocoord_file_key = list(FIELD_PARCELS.keys())[geocoord_file_index]
                 field_date, field_name = ChunkUtils.parseChunkName(dem_file)
 
-                for parcel in FIELD_PARCELS["aufwuchs1"][field_name]:
+                for parcel in FIELD_PARCELS[geocoord_file_key][field_name]:
                     if(parcel in ["GCP", "BS"]): continue
 
                     bez = "BM{}P{}{}".format(rec, parcel, parcelNo+1)
 
-                    writer.writerow([bez, baseModel, dem_file, parcel, parcelNo, 0, "aufwuchs1"])
+                    writer.writerow([bez, baseModel, dem_file, parcel, parcelNo, 0, geocoord_file_key])
 
                 parcelNo += 1
 
-        raise Exception("Bitte fülle die Auftragsdatei mit den gewünschten Werten und starte dieses Skript neu.")
+        raise Exception("Bitte fülle die Auftragsdatei \"compare_dem_task.csv\" mit den gewünschten Operationen und starte dieses Skript neu.")
 
 
 # First create the export folders if they are not already there
@@ -105,13 +113,20 @@ for index, task in tasks_df.iterrows():
     compare_model_path = DEM_EXPORT_FOLDER + task["Aufzeichnung"] + ".tif"
 
     # Geo coord file falls back to first if not defined
-    geo_coord_file = task["Geo Koordinaten"] or FIELD_PARCELS.keys()[0]
+    geo_coord_file = task["Geo Koordinaten"] or list(FIELD_PARCELS.keys())[0]
+
+    if geo_coord_file in FIELD_PARCELS:
+        field_parcel_data = FIELD_PARCELS[geo_coord_file]
+    elif os.path.exists(geo_coord_file):
+        field_parcel_data = FileUtils.read_geocoord_file(geo_coord_file)
+    else:
+        raise Exception("Geocoord file not found: {} Please check in config.ini or specify absolute path in compare_dem_task.csv file".format(geo_coord_file))
 
     # get the field name from the first chunk label
     field_date, field_name = ChunkUtils.parseChunkName(doc.chunks[0].label)
     
     # get raw parcel corner data
-    parcel_full_u = FIELD_PARCELS[geo_coord_file][field_name][task["Parzelle"]]
+    parcel_full_u = field_parcel_data[field_name][task["Parzelle"]]
 
     # Sort parcel corners to ensure right orientation.
     # Order is SO, SW, NW, NO
@@ -165,7 +180,7 @@ for index, task in tasks_df.iterrows():
     saveVal("25", dem_diff.quantile(0.25).item())
     saveVal("75", dem_diff.quantile(0.75).item())
 
-
+    app.update()
     continue
 
     #dem_record = rio.open(compare_model_path)
@@ -187,5 +202,8 @@ for index, task in tasks_df.iterrows():
 
     break
 
+print("================================")
+print("Finished task. Check {} for results.".format(task_csv_file_out))
+print("================================")
 # write result to result csv
 tasks_df.to_csv(task_csv_file_out, sep=";", decimal=",")

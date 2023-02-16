@@ -51,5 +51,9 @@ class FileUtils:
 		# reads all specified geocoord files, returns indexed dict
 		res = {}
 		for key,value in csv_files.items():
-			res[key] = FileUtils.read_geocoord_file(value)
+			r = FileUtils.read_geocoord_file(value)
+			if not r:
+				warnings.warn("{} skipped, Reason: File not avaliable".format(key))
+			else:
+				res[key] = FileUtils.read_geocoord_file(value)
 		return res

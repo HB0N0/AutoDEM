@@ -22,7 +22,12 @@ class GcpDetector:
         if(image == False):
             raise Exception("No image specified")
 
-        img = cv2.imread(image)
+        #img = cv2.imread(image)
+        # trows error with space in path
+        img = cv2.imdecode(np.fromfile(image, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+        if np.shape(img) == ():
+            print("Image could not be read: {}".format(image))
+            return False
         img_sat = self._filterPixelsBySaturation(img)
         img_gray = cv2.cvtColor(img_sat, cv2.COLOR_BGR2GRAY)
 

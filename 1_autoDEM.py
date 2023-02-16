@@ -42,6 +42,7 @@ documentFile = FileUtils.parsePath(doc.path)
 
 # CONFIG
 MARKER_MAX_ERROR_METERS = config["Defaults"].getfloat("MARKER_MAX_ERROR_METERS", 0.1)
+MARKER_MIN_PINS = config["Defaults"].getint("MARKER_MIN_PINS", 0)
 
 DEM_EXPORT_FOLDER = os.path.expanduser(config["Defaults"].get("DEM_EXPORT_FOLDER", "~\\Desktop\\autoDEM\\"))
 DEM_EXPORT_FOLDER += documentFile['name'] + "\\"
@@ -58,7 +59,7 @@ Metashape.app.settings.log_path = LOG_FILE
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--import_new', dest='import_new', type=bool, help='Work with existing chunks or import new data')
+parser.add_argument('--import-new', dest='import_new', type=bool, help='Work with existing chunks or import new data')
 parser.add_argument('--recpath', dest='records_path', type=str, help='Directory to scan for records')
 parser.add_argument('--import-only', dest='import_only', type=bool, help='Only creates the chunks and basic camera aligning, no processing', default=False)
 parser.add_argument('--refpath', dest='reference_path', type=str, help='Path to file containing GCP references')
@@ -191,6 +192,14 @@ gcp_failed_chunks = []
 # build surface model
 for chunk in doc.chunks:
 	if chunk.enabled == False: continue
+
+	# Skip already exported chunks (check if tif file exists)
+	dem_export_path = DEM_EXPORT_FOLDER + chunk.label + ".tif"
+	if(os.path.exists(dem_export_path)):
+		print("DEM file already exists for chunk: " + chunk.label, ", skipping export.")
+		print("Move or delete output file to create new export.")
+		continue
+
 	# Check Error level and only continue if error level is under max value
 	# If error level is to high chunk processing is skipped
 	chunk_marker_error = ChunkUtils.getReferenceTotalError(chunk)
@@ -200,21 +209,30 @@ for chunk in doc.chunks:
 	marker_pins = ChunkUtils.getPinnedMarkersCount(chunk)
 	for marker,count in marker_pins.items():
 		stats.setValue(chunk, "GcpToMarker/Markers/"+marker, count)
+	
+	chunk_min_marker_pins = min(marker_pins.values())
 
 	stats.saveFile()
 
 	if(chunk_marker_error >= MARKER_MAX_ERROR_METERS):
-		gcp_failed_chunks.append((chunk, chunk_marker_error))
+		gcp_failed_chunks.append((chunk, chunk_marker_error, chunk_min_marker_pins))
 		print("Skipping chunk " + chunk.label + " due inaccurate marker positions")
+		continue
+
+	if(chunk_min_marker_pins < MARKER_MIN_PINS):
+		gcp_failed_chunks.append((chunk, chunk_marker_error, chunk_min_marker_pins))
+		print("Skipping chunk " + chunk.label + " due to few marker projections")
 		continue
 
 	# Ensure that the model is optimized from GCPs
 	# Update Model
 	chunk.updateTransform()
-	# Optimize Cameras
-	chunk.optimizeCameras()
 
 	if(len(chunk.dense_clouds) <= 0):
+		# Optimize Cameras
+		# !!!IMPORTANT this deletes all dense clouds and depth maps - only use on not already exported chunks!!
+		chunk.optimizeCameras() 
+
 		# Downscale is what is named "quality" in GUI. Where 0 - is Ultra, 1 - High, 2 - Medium, 4 - Low.
 		chunk.buildDepthMaps(
             downscale = 1, 
@@ -244,17 +262,14 @@ for chunk in doc.chunks:
 		print("Orthomosaic found in chunk: " + chunk.label, ", skipping")
 
     # Export DEM
-	dem_export_path = DEM_EXPORT_FOLDER + chunk.label + ".tif"
-	if(not os.path.exists(dem_export_path)):
-		chunk.exportRaster(
-			path = dem_export_path,
-			image_format = Metashape.ImageFormat.ImageFormatTIFF,
-			save_world = True,
-			source_data = Metashape.DataSource.ElevationData
-		)
-	else:
-		print("DEM file already exists for chunk: " + chunk.label, ", skipping export.")
-		print("Move or delete output file to create new export.")
+
+	chunk.exportRaster(
+		path = dem_export_path,
+		image_format = Metashape.ImageFormat.ImageFormatTIFF,
+		save_world = True,
+		source_data = Metashape.DataSource.ElevationData
+	)
+
 
 	stats.saveChunkMeta(chunk)
 	stats.setValue(chunk, "dem_export_path", dem_export_path)
@@ -269,7 +284,7 @@ if(len(gcp_failed_chunks) > 0 ):
 	gcp_failed_text +=  "WARNING -----------------------------------------------------\n"
 	gcp_failed_text += "Auto GCP detection was to unaccurate in following chunks: \n"
 	for failed in gcp_failed_chunks:
-		gcp_failed_text += "\t" + failed[0].label + " Error:" + str(failed[1]) + "\n"
+		gcp_failed_text += "\t" + failed[0].label + " Error:" + str(failed[1]) + " Min Marker Projections:" + str(failed[2]) + "\n"
 	gcp_failed_text += "Try to correct marker locations by hand and run this script again\n"
 	gcp_failed_text += "Successful chunks will be ignored and not proccessed again\n"
 	gcp_failed_text += "-------------------------------------------------------------\n"
