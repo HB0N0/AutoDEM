@@ -22,58 +22,68 @@ class GcpDetector:
         if(image == False):
             raise Exception("No image specified")
 
-        #img = cv2.imread(image)
-        # trows error with space in path
+        # First read the image file in a cv2 frame
+        # cv2.imread(image) trows error with space in path this version is more stable
         img = cv2.imdecode(np.fromfile(image, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
         if np.shape(img) == ():
             print("Image could not be read: {}".format(image))
             return False
+
+        # Filter image by saturation - this removes all saturated pixels and leaves only gray pixels
         img_sat = self._filterPixelsBySaturation(img)
+
+        # Now color is not important anymore, convert result in grayscale
         img_gray = cv2.cvtColor(img_sat, cv2.COLOR_BGR2GRAY)
 
+        # Find key points in image
+        # If there is a GCP on this image many key points are on or around the GCP
         pts = self._findKeyPoints(img_gray)
         if(len(pts) <= 0): return False
         
+        # The guess point is the point with the smallest distance to every other point
         guess_point = self._getBestMatchingKeyPoint(pts)
         if(guess_point == False): return False
 
         print(guess_point)
 
+        # Now look at area around the guess point and try to locate the center of the GCP
         crop_size = 16
         crop = self._cropImageAroundPoint(img_gray, guess_point, crop_size)
 
+        # this utilises cv2.moments() function to find the center of the blob of white pixels
         gcpCenter = self._findCenterOfObject(crop)
 
         if(gcpCenter == False): return False
 
+        # Last, check the matched GCP for the right shape, this filters lines or objects
         isGCP = self._checkGcpShape(gcpCenter, crop)
 
         if(not isGCP):
             return False
 
-        # we know this point is a gcp, now we need the coordinates in the real image instead of the cropped
+        # We know this point is a GCP, now we need the coordinates in the real image instead of the cropped
         centerX = guess_point[0] - crop_size + gcpCenter[0]
         centerY = guess_point[1] - crop_size + gcpCenter[1]
         return centerX, centerY
         
 
     def _filterPixelsBySaturation(self, img):
-        # preparing the mask to overlay
+        # Preparing the mask to overlay
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, np.array([0, 0, 100]), np.array([255, 50, 255]))
         # The black region in the mask has the value of 0,
-        # so when multiplied with original image removes all non-gray regions
+        # So when multiplied with original image removes all non-gray regions
         return cv2.bitwise_and(img, img, mask = mask)
 
     def _findKeyPoints(self, img):
         # Create ORB keypoint detector
         orb = cv2.ORB_create(edgeThreshold=15, patchSize=31, nlevels=8, fastThreshold=20, scaleFactor=12/10, WTA_K=2,scoreType=cv2.ORB_HARRIS_SCORE, firstLevel=0, nfeatures=6 )
 
-        # find the keypoints with ORB
+        # Find the keypoints with ORB
         kp = orb.detect(img,None)
 
-        # compute the descriptors with ORB
-        kp, des = orb.compute(img, kp)  ### TODO if this works with graysacle
+        # Compute the descriptors with ORB
+        kp, des = orb.compute(img, kp)
 
         pts = cv2.KeyPoint_convert(kp)
         return pts
@@ -105,9 +115,6 @@ class GcpDetector:
         # take the best weighted poits and calculate center (avg)
         return [int(sum(x)/len(x)) for x in zip(*pts)] 
 
-        
-
-
     def _cropImageAroundPoint(self, img, center, crop_size):
         xMin = self._clamp(center[1]-crop_size, 0, len(img[0]))
         xMax = self._clamp(center[1]+crop_size, 0, len(img[0]))
@@ -121,12 +128,10 @@ class GcpDetector:
         return num
 
     def _findCenterOfObject(self, img):
-        #find center
         # calculate moments of binary image
         M = cv2.moments(img)
         # calculate x,y coordinate of center (coordinates are of cropped image)
         if(M["m00"] == 0): return False
-
         cX = M["m10"] / M["m00"]
         cY = M["m01"] / M["m00"]
         return [cX, cY]
@@ -134,7 +139,6 @@ class GcpDetector:
     def _checkGcpShape(self, center, img):
         # First threshold image to get binary image (and detect the white spots)
         thresh, img = cv2.threshold(img, 150, 255, cv2.THRESH_BINARY)
-        
 
         #check if surroundings match a hourglass or chess field shape
         gcp_matched = False
@@ -142,7 +146,6 @@ class GcpDetector:
         # if basic shape is matched check also 
         min_degrees = 30
         min_radians = min_degrees * math.pi / 180
-
 
         # loop from -3.14 to +3.14 (to get all points circular around the center)
         match_start = False
@@ -157,7 +160,6 @@ class GcpDetector:
                 else:
                     gcp_matched = False
                 break
-
 
         return gcp_matched
 
