@@ -17,18 +17,19 @@ class GcpToMarker:
         if(chunk == False):
             raise Exception("No Chunk specified.")
 
-        # setup shapes if not exist - this is needed to draw the found control points for visualisation
+        # Setup shapes if not exist 
+        # this is needed to draw the control points for visualisation on the map
         if not chunk.shapes:
             chunk.shapes = Metashape.Shapes()
             chunk.shapes.crs = chunk.crs
 
-        # next step is to loop through the cameras and try to detect a marker in every single image
+        # Next step is to loop through the cameras and try to detect a marker in every single image
         for camera in chunk.cameras:
             print("Processing " + camera.photo.path + "...")
             self._processCamera(chunk, camera)
 
         # Cleanup
-        # Bad markers are outliers, points that are only detected in a single image
+        # Bad markers are outliers, for example points that are only detected in a single image
         self._unpinBadMarkers(chunk)
 
         # Update Model
@@ -39,22 +40,22 @@ class GcpToMarker:
 
         
     def _processCamera(self, chunk, camera):
-        # process image and try to detect GCP
+        # Process image and try to detect GCP
         foundGCP = gcpDetect.processImage(camera.photo.path)
 
         if(foundGCP != False):
-            # this camera contains a GCP - append it to camera label (for debugging)
+            # This camera contains a GCP - append it to camera label (for debugging)
             camera.label += " [GCP]"
 
-            coords_2D = Metashape.Vector(foundGCP)
+            gcp_pixel_coords = Metashape.Vector(foundGCP)
 
             # In the next step draw points in 3d world (with the matched gcps)
             # First calc 3d coordinates from image pixel coordinates
-            point_internal = chunk.point_cloud.pickPoint(camera.center, camera.unproject(coords_2D))
-            point3D_world = chunk.crs.project(chunk.transform.matrix.mulp(point_internal))
+            point_internal = chunk.point_cloud.pickPoint(camera.center, camera.unproject(gcp_pixel_coords))
+            gcp_3d_world = chunk.crs.project(chunk.transform.matrix.mulp(point_internal))
             # Then draw point at 3D coordinate
             shape = chunk.shapes.addShape()
-            shape.geometry = Metashape.Geometry.Point(point3D_world)
+            shape.geometry = Metashape.Geometry.Point(gcp_3d_world)
 
             # Next we estimate the nearest marker to the point by calculating distances from all markers
             distanceList = [] # (marker, distance)
@@ -63,42 +64,41 @@ class GcpToMarker:
                 # Get a copy of the points and set the Z-Coordinate to zero to eliminate height measurement errors
                 marker_point = marker.reference.location.copy()
                 marker_point.z = 0
-                gcp_point = point3D_world.copy()
+                gcp_point = gcp_3d_world.copy()
                 gcp_point.z = 0
 
-                # calc point distance
+                # Calc point distance
                 distance = (marker_point - gcp_point).norm()
-                # create list of markers with distance as weight parameter
+                # Create list of markers with distance as weight parameter
                 distanceList.append((marker, distance))
             
-            # now we can sort the markers list by ascending distance (shortest first)
+            # Now we can sort the markers list by ascending distance (shortest first)
             distanceList.sort(key=lambda tup: tup[1], reverse=False)
-            # the nearest marker is now our first list item
+            # The nearest marker is now our first list item
             bestMarker = distanceList[0][0]
             bestMarkerDistance = distanceList[0][1]
 
-            # if distance to marker is under the distance threshould "pin" the marker
+            # If distance to marker is under the distance threshould "pin" the marker
             if(bestMarkerDistance < 0.0003):
-                bestMarker.projections[camera] = Metashape.Marker.Projection(coords_2D, True)
+                bestMarker.projections[camera] = Metashape.Marker.Projection(gcp_pixel_coords, True)
 
-            #camera.label += " " + bestMarker.label + " " + str(bestMarkerDistance)
             app.update()
 
     def _unpinBadMarkers(self, chunk, errorThreshold = 80000):
-        # after setting markers automatically some of them may be false and increase the model error
-        # this function unpins markers above a threshold level
+        # After setting markers automatically some of them may be false and increase the model error
+        # This function unpins markers above a threshold level
         for marker in chunk.markers:
             for camera in chunk.cameras:
-                # if marker is not pinned on this camera continue
+                # If marker is not pinned on this camera continue
                 if not camera in marker.projections.keys():
                     continue
 
-                #2 dimensional vector of the marker projection on the photo
+                # 2 dimensional vector of the marker projection on the photo
                 v_proj = marker.projections[camera].coord 
-                #2 dimensional vector of projected 3D marker position
+                # 2 dimensional vector of projected 3D marker position
                 v_reproj = camera.project(marker.position) 
                 
-                # calc the reprojection error for current photo
+                # Calc the reprojection error for current photo
                 diff = (v_proj - v_reproj).norm() ** 2 
                     
                 print(marker.label + " " + camera.label + "Error: " + str(diff))

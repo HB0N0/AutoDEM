@@ -13,26 +13,30 @@ from metashape_util.stats import  Stats
 from metashape_util.email_notify import EmailNotify
 
 from gcp_detector.gcpToMarker import GcpToMarker
-
+ 
 # in metashape args:
 #   --year 2022 --field R1 --refpath "J:\440a\HiWi\Allgemein\Stumpe\DiWenkLa\03_Versuchsflächen\Koordinaten_GCP_R1.txt"
 
+# Init globals
 app = Metashape.Application()
 doc = app.document
 dialog = Dialog(app)
 gcpToMarker = GcpToMarker()
 
-#config parser
+# Config parser - read config.ini
 config = configparser.ConfigParser()
 config.read(sys.path[0] + "\config.ini")
 
-#setup email configuration
+# Setup email configuration
 notify = EmailNotify(config["EmailNotify"])
 
+# Save script start time for performance measure
 start_time = datetime.now()
 
 
-
+# Save the document before starting
+# The "Save As.." Dialog is not working from the Python API 
+# if the document is not saved already somewhere document.save() thorws an error
 try:
 	doc.save()
 except OSError:
@@ -40,19 +44,21 @@ except OSError:
 
 documentFile = FileUtils.parsePath(doc.path)
 
-# CONFIG
+# read global config variables
 MARKER_MAX_ERROR_METERS = config["Defaults"].getfloat("MARKER_MAX_ERROR_METERS", 0.1)
 MARKER_MIN_PINS = config["Defaults"].getint("MARKER_MIN_PINS", 0)
 
 DEM_EXPORT_FOLDER = os.path.expanduser(config["Defaults"].get("DEM_EXPORT_FOLDER", "~\\Desktop\\autoDEM\\"))
 DEM_EXPORT_FOLDER += documentFile['name'] + "\\"
 
+# create export directory structure
 FileUtils.createDirsIfNotExists(DEM_EXPORT_FOLDER)
 
-# stats file containing 
+# stats file containing metrics about task durections and chunk quality
 STATS_FILE = DEM_EXPORT_FOLDER + "stats.csv"
 stats = Stats(STATS_FILE)
 
+# Enable log file
 LOG_FILE = DEM_EXPORT_FOLDER + time.strftime("%Y%m%d-%H%M%S") + "- log.txt"
 Metashape.app.settings.log_enable = True
 Metashape.app.settings.log_path = LOG_FILE
@@ -75,7 +81,15 @@ else:
 	import_new = args.import_new
 
 if(import_new or args.import_only):
-
+	# Look for the directory where the records are stored.
+	# The directory structure has to match:
+	# .../
+	#		YYYY-MM-DD_[Field Name]/
+	#			FPLAN/
+	#				IMG_001.JPG
+	#				IMG_002.JPG
+	#				...
+	#		...
 	BASE_PATH = args.records_path or app.getExistingDirectory("Select Folder with records")
 	print("Scanning directory: " + BASE_PATH)
 
@@ -98,8 +112,6 @@ if(import_new or args.import_only):
 		
 	# Read all records from specified directory
 	avaliable_records = scan_records_dir(BASE_PATH)
-	#pprint(avaliable_records.keys())
-
 
 	# Let user select year and field to import
 	# if already given by console args no dialog will open
@@ -108,6 +120,7 @@ if(import_new or args.import_only):
 	year = args.year or dialog.getListCoice(list(avaliable_records.keys()), "Wähle das Jahr", len(avaliable_records))
 	print("Selected: " + year)
 
+	# Select Field (like year)
 	if(args.field and not args.field in avaliable_records[year]): 
 		args.field = False
 	field = args.field or dialog.getListCoice(list(avaliable_records[year].keys()), "Wähle den Schlag", 1)
@@ -127,24 +140,24 @@ if(import_new or args.import_only):
 
 	# create chunk for each date a record exists
 	print("Creating chunks...")
-
 	for rec in records:
 		# first create new chunk
 		chunk = doc.addChunk()
 		chunk.label = rec + "_" + field  # label is [date]_[field]
-		
 		base_path = records[rec]
 		photos_list[rec] = []
 
-		# get images from dir
+		# get image pathes from dir and save to photos_list array
 		for mission in os.scandir(base_path):
 			if(mission.is_dir() and re.search(r"FPLAN", mission.name)): # only scan mission directorys for files
 				for file in os.scandir(mission.path):
 					if(file.name.rsplit(".", 1)[1].upper() in ["JPG", "JPEG"]): # only import jpg images
 						photos_list[rec].append(file.path)
-						
+
+		# Add photos to chunk				
 		chunk.addPhotos(photos_list[rec])
 		
+		# Import Markers to chunks
 		if(ref_file):
 			chunk.importReference(path=ref_file, delimiter="\t", format=Metashape.ReferenceFormatCSV, columns="nxyz", create_markers=True)
 		app.update()
@@ -152,10 +165,10 @@ if(import_new or args.import_only):
 	doc.save()
 	
 if (args.import_only):
-	quit(True) # Not working properly
-	raise Exception("Script ended successful after import")
+	quit(True) # Not working properly (Metashape problem)
+	raise Exception("Script ended successful after import") # workaround to end the script by raising an error
 	
-# align photos
+# Align photos
 for chunk in list(doc.chunks):
 	if chunk.enabled == False: continue
 	if not ChunkUtils.hasChunkPointCloud(chunk):
@@ -166,34 +179,37 @@ for chunk in list(doc.chunks):
 		chunk.alignCameras()
 	else:
 		print("Cameras already aligned in Chunk: " + chunk.label, ", skipping")
+	app.update()
 	
+# Save Project
 doc.save()
-app.update()
 
-
-
-# for each chunk match gcps
+# For each chunk match Ground Control Points
+# Chunks are skipped if they are disabled or have already pinned markers
 for chunk in doc.chunks:
 	if chunk.enabled == False: continue
 	if(not ChunkUtils.areMarkersPinned(chunk)):
 		print("Detecting GCPs in chunk: " + chunk.label + "...")
-		gcp_start = time.time()
+		gcp_process_start = time.time()
 		gcpToMarker.processChunk(chunk)
-		print("Finished, Operation took: " + str(time.time() - gcp_start) + " secounds")
-		stats.setValue(chunk, "GcpToMarker/duration", time.time() - gcp_start)
+		gcp_process_duration = time.time() - gcp_process_start
+		print("Finished, Operation took: " + str(gcp_process_duration) + " secounds")
+		stats.setValue(chunk, "GcpToMarker/duration", gcp_process_duration)
 	else:
 		print("Markers already pinned in Chunk: " + chunk.label, ", skipping GCP detection")
 	app.update()
 
+# Write GCP processing durations to stats file
 stats.saveFile()
 
 doc.save()
 gcp_failed_chunks = []
+
 # build surface model
 for chunk in doc.chunks:
 	if chunk.enabled == False: continue
 
-	# Skip already exported chunks (check if tif file exists)
+	# Skip already exported chunks (check if .tif file exists)
 	dem_export_path = DEM_EXPORT_FOLDER + chunk.label + ".tif"
 	if(os.path.exists(dem_export_path)):
 		print("DEM file already exists for chunk: " + chunk.label, ", skipping export.")
@@ -205,14 +221,15 @@ for chunk in doc.chunks:
 	chunk_marker_error = ChunkUtils.getReferenceTotalError(chunk)
 	stats.setValue(chunk, "GcoToMarker/Marker_error", chunk_marker_error)
 
-	# Check how many pins each marker has (only for stats)
+	# Check how many pins each marker has
 	marker_pins = ChunkUtils.getPinnedMarkersCount(chunk)
-	for marker,count in marker_pins.items():
+	for marker, count in marker_pins.items():
 		stats.setValue(chunk, "GcpToMarker/Markers/"+marker, count)
 	
-	chunk_min_marker_pins = min(marker_pins.values())
-
 	stats.saveFile()
+
+	# Get the Marker with the least pins
+	chunk_min_marker_pins = min(marker_pins.values())
 
 	if(chunk_marker_error >= MARKER_MAX_ERROR_METERS):
 		gcp_failed_chunks.append((chunk, chunk_marker_error, chunk_min_marker_pins))
@@ -262,7 +279,6 @@ for chunk in doc.chunks:
 		print("Orthomosaic found in chunk: " + chunk.label, ", skipping")
 
     # Export DEM
-
 	chunk.exportRaster(
 		path = dem_export_path,
 		image_format = Metashape.ImageFormat.ImageFormatTIFF,
@@ -270,15 +286,16 @@ for chunk in doc.chunks:
 		source_data = Metashape.DataSource.ElevationData
 	)
 
-
+	# Save the stats file
 	stats.saveChunkMeta(chunk)
 	stats.setValue(chunk, "dem_export_path", dem_export_path)
 	stats.saveFile()
 
+# Script ended sucessful, save
 doc.save()
 end_time = datetime.now()			
 
-
+# Output a message about failed chunks which have to get corrected by hand
 gcp_failed_text = ""
 if(len(gcp_failed_chunks) > 0 ):
 	gcp_failed_text +=  "WARNING -----------------------------------------------------\n"
@@ -300,8 +317,8 @@ The exported elevation models (if any) are located in:
 ######################################
 """.format(duration=(end_time - start_time), gcp_failed_text = gcp_failed_text, export_dir=DEM_EXPORT_FOLDER)
 
+# Print result to console
 print(result)
 
-#send email notification
+# Send email notification
 notify.notify("Job finished! {}".format(documentFile['name']), result)
-

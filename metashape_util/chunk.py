@@ -3,8 +3,11 @@ import warnings
 import Metashape
 
 class ChunkUtils:
-
 	def parseChunkName(name):
+		"""
+		Reads Chunk name and resolves to field_date and field_name
+		:return: [field_date, field_name]
+		"""
 		field_name_match = re.match(r"(\d{4}\-\d{2}\-\d{2})[\s\_](.+)$", name, re.IGNORECASE)
 		if not field_name_match: 
 			warnings.warn("Chunkname {} doesnt match requirements YYYY-MM-DD_Schlagname. ".format(name))
@@ -14,24 +17,36 @@ class ChunkUtils:
 		return field_date, field_name
 
 	def areCamerasAligned(chunk):
+		"""
+		Check if there are cameras in this chunk and cameras have transform information
+		"""
 		for camera in chunk.cameras:
 			if camera.transform:
 				return True
 		return False
 
 	def hasChunkPointCloud(chunk):
+		"""
+		Returns true if chunk has a point cloud
+		"""
 		if chunk.point_cloud:
 			return True
 		else:
 			return False
 
 	def areMarkersPinned(chunk):
+		"""
+		Check if at least one marker in this chunk has projections
+		"""
 		for marker in chunk.markers:
 			if marker.projections:
 				return True
 		return False
 
 	def getPinnedMarkersCount(chunk):
+		"""
+		
+		"""
 		pinned = dict()
 		for marker in chunk.markers:
 			pinned[marker.label] = len(marker.projections)
