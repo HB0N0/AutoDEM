@@ -206,26 +206,6 @@ for index, task in tasks_df.iterrows():
       })
 
     app.update()
-    continue
-
-    #dem_record = rio.open(compare_model_path)
-    #out_image_record, transformed_record = mask(dem_record, [mask_parcel], crop=True, filled=True, pad=True)
-    #dem_record_array = out_image_record.astype('float64')
-
-    #dem_array = dem_record_array - dem_base_array
-    
-    fig, ax = plt.subplots(1, ncols=4, figsize=(12, 12))
-
-    base_dem.plot(ax=ax[0])
-    repr_compare.plot(ax=ax[1])
-    dem_diff.plot(ax=ax[2])
-    dem_diff.plot.hist(ax=ax[3])
-    #show(out_image_base, cmap='rainbow', vmin=390, ax=ax[0])
-    #show(dem_record, cmap='rainbow', vmin=390, ax=ax[1])
-    #show(dem_array, cmap='rainbow', vmin=390, ax=ax[0])
-    plt.show()
-
-    break
 
 # export geojson file
 with open(parcel_geojson_path, 'w', encoding='utf8') as pf:
