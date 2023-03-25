@@ -147,15 +147,22 @@ if(import_new or args.import_only):
 		base_path = records[rec]
 		photos_list[rec] = []
 
+		print("Creating chunk {}".format(chunk.label))
+
 		# get image pathes from dir and save to photos_list array
 		for mission in os.scandir(base_path):
-			if(mission.is_dir() and re.search(r"FPLAN", mission.name)): # only scan mission directorys for files
+			if(mission.is_dir() and (re.search(r"FPLAN", mission.name) or re.search(r"MEDIA", mission.name))): # only scan mission directorys for files
 				for file in os.scandir(mission.path):
 					if(file.name.rsplit(".", 1)[1].upper() in ["JPG", "JPEG"]): # only import jpg images
 						photos_list[rec].append(file.path)
 
-		# Add photos to chunk				
-		chunk.addPhotos(photos_list[rec])
+		# Add photos to chunk
+		if(len(photos_list[rec]) == 0):
+			print("Keine JPG-Dateien gefunden, Chunk wird deaktiviert")
+			chunk.enabled = False
+		else:	
+			print("{} Fotos gefunden, importiere in Chunk {}".format(len(photos_list[rec]), chunk.label))			
+			chunk.addPhotos(photos_list[rec])
 		
 		# Import Markers to chunks
 		if(ref_file):
