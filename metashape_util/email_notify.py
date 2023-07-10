@@ -43,3 +43,13 @@ class EmailNotify:
         except Exception as ex:
             print("Email send failed!")
             print("Something went wrong….",ex)
+
+    def exeptionHandler(self, project, type, value, tback):
+        content = """
+        A unhandled Exception occured!
+        Exception Type: {type}
+        Value: {value}
+        StackTrace: {tb}
+        """.format(type=type, value = value, tb=tback)
+        
+        self.notify("ERROR in {}".format(project), content)

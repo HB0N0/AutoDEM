@@ -77,7 +77,16 @@ class GcpDetector:
 
     def _findKeyPoints(self, img):
         # Create ORB keypoint detector
-        orb = cv2.ORB_create(edgeThreshold=15, patchSize=31, nlevels=8, fastThreshold=20, scaleFactor=12/10, WTA_K=2,scoreType=cv2.ORB_HARRIS_SCORE, firstLevel=0, nfeatures=6 )
+        orb = cv2.ORB_create(
+            edgeThreshold=15, 
+            patchSize=31, 
+            nlevels=8, 
+            fastThreshold=20, 
+            scaleFactor=12/10, 
+            WTA_K=2,
+            scoreType=cv2.ORB_HARRIS_SCORE, 
+            firstLevel=0, 
+            nfeatures=6 )
 
         # Find the keypoints with ORB
         kp = orb.detect(img,None)

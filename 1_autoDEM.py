@@ -44,6 +44,11 @@ except OSError:
 
 documentFile = FileUtils.parsePath(doc.path)
 
+def except_hook(type, value, tback):
+    notify.exeptionHandler(documentFile['name'], type, value, tback)
+    sys.__excepthook__(type, value, tback)
+sys.excepthook = except_hook
+
 # read global config variables
 MARKER_MAX_ERROR_METERS = config["Defaults"].getfloat("MARKER_MAX_ERROR_METERS", 0.1)
 MARKER_MIN_PINS = config["Defaults"].getint("MARKER_MIN_PINS", 0)

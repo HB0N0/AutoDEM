@@ -1,4 +1,5 @@
 import os
+import re
 import csv
 from collections import defaultdict
 import warnings
@@ -21,6 +22,10 @@ class FileUtils:
 		if not os.path.exists(path):
 			os.makedirs(path)
 			print("Export dir created: " + path)
+
+	def name_escape(text):
+		re.sub(r"(_|-)+", " ", text).title().replace(" ", "")
+		return "".join(c for c in text if c.isalnum())
 
 	def read_geocoord_file(csv_file):
 		# reads geocoordiante csv file

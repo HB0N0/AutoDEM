@@ -54,8 +54,7 @@ class GeoUtils:
 	TILE_MODE_FOLLOW_BOTH = 3
 	"""Tile borders are parallel to east border. West-East borders follow north and south side of the parcel"""
 
-	def getParcelTile(parcel, x_index = 0, y_index = 0, tile_mode = TILE_MODE_PARALLEL, tile_size_x_m = 1, tile_size_y_m = 1):
-		"""Takes """
+	def getParcelTile(parcel, x_index = 0, y_index = 0, tile_mode = TILE_MODE_PARALLEL, tile_size_x_m = 1, tile_size_y_m = 1, tile_origin = "SW"):
 		vToPoint = GeoUtils.vToPoint
 		SO, SW, NW, NO = parcel
 		if tile_mode == GeoUtils.TILE_MODE_FOLLOW_NORTH:
@@ -86,9 +85,22 @@ class GeoUtils:
 				SO + vToPoint(SO, NO, (x_index * tile_size_y)+ tile_size_y) + vToPoint(NW, NO, (y_index * tile_size_x)),
 			] # Point order [SO,SW,NW,NO]
 		elif tile_mode == GeoUtils.TILE_MODE_PARALLEL:
-			return [
-				SW + vToPoint(SW, NW, (x_index * tile_size_y_m)) + vToPoint(SW, SO, (y_index * tile_size_x_m) + tile_size_x_m),
-				SW + vToPoint(SW, NW, (x_index * tile_size_y_m)) + vToPoint(SW, SO, (y_index * tile_size_x_m)),
-				SW + vToPoint(SW, NW, (x_index * tile_size_y_m) + tile_size_y_m) + vToPoint(SW, SO, (y_index * tile_size_x_m)),
-				SW + vToPoint(SW, NW, (x_index * tile_size_y_m) + tile_size_y_m) + vToPoint(SW, SO, (y_index * tile_size_x_m) + tile_size_x_m),
-			] # Point order [SO,SW,NW,NO]
+			if(tile_origin not in ["SW", "SO"]):
+				print("Only Origni Points [SW] and [SO] are avaliable at the moment, resetting to [SW]")
+				tile_origin = "SW"
+
+			if(tile_origin == "SW"):
+				return [
+					SW + vToPoint(SW, NW, (x_index * tile_size_y_m)) + vToPoint(SW, SO, (y_index * tile_size_x_m) + tile_size_x_m),
+					SW + vToPoint(SW, NW, (x_index * tile_size_y_m)) + vToPoint(SW, SO, (y_index * tile_size_x_m)),
+					SW + vToPoint(SW, NW, (x_index * tile_size_y_m) + tile_size_y_m) + vToPoint(SW, SO, (y_index * tile_size_x_m)),
+					SW + vToPoint(SW, NW, (x_index * tile_size_y_m) + tile_size_y_m) + vToPoint(SW, SO, (y_index * tile_size_x_m) + tile_size_x_m),
+				] # Point order [SO,SW,NW,NO]
+			if(tile_origin == "SO"):
+				return [
+					SO + vToPoint(SO, NO, (x_index * tile_size_y_m)) + vToPoint(SW, SO, (y_index * tile_size_x_m)),
+					SO + vToPoint(SO, NO, (x_index * tile_size_y_m)) + vToPoint(SW, SO, (y_index * tile_size_x_m) - tile_size_x_m),
+					SO + vToPoint(SO, NO, (x_index * tile_size_y_m) + tile_size_y_m) + vToPoint(SW, SO, (y_index * tile_size_x_m) - tile_size_x_m),
+					SO + vToPoint(SO, NO, (x_index * tile_size_y_m) + tile_size_y_m) + vToPoint(SW, SO, (y_index * tile_size_x_m)),
+				] # Point order [SO,SW,NW,NO]
+
